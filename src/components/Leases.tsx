@@ -1,0 +1,372 @@
+import { useState } from 'react'
+import { useDatabase } from '@/hooks/useDatabase'
+import {
+  getLeases,
+  createLease,
+  recordLeasePayment,
+  purchaseLease,
+  returnLease,
+  createAsset,
+  sellAsset,
+  getCurrentPeriod,
+  createTransaction,
+  getSetting,
+  getAssetByLeaseId,
+  getCategories,
+} from '@/db/queries'
+import { getNetBookValue } from '@/lib/calculations'
+import { persistDatabase } from '@/db/database'
+import { formatCurrency, formatPercent, todayISO } from '@/lib/utils'
+import { Card, CardContent, CardHeader, CardTitle } from './ui/card'
+import { Button } from './ui/button'
+import { Input } from './ui/input'
+import { Label } from './ui/label'
+import { Select } from './ui/select'
+import { Dialog, DialogHeader, DialogTitle } from './ui/dialog'
+import { Badge } from './ui/badge'
+import { Progress } from './ui/progress'
+import { Plus, CreditCard, Package, RotateCcw } from 'lucide-react'
+
+function getAssetTypeConfig(db: import('sql.js').Database) {
+  const depVehicle = parseInt(getSetting(db, 'dep_years_vehicle') ?? '5')
+  const depImplement = parseInt(getSetting(db, 'dep_years_implement') ?? '5')
+  const depBuilding = parseInt(getSetting(db, 'dep_years_building') ?? '10')
+  return {
+    vehicle: { label: 'Tractor / Vehicle', depYears: depVehicle as number | null },
+    implement: { label: 'Implement / Tool', depYears: depImplement as number | null },
+    building: { label: 'Building', depYears: depBuilding as number | null },
+    land: { label: 'Land', depYears: null as number | null },
+  }
+}
+
+/** Compute the fixed monthly payment for a lease (simple interest). */
+function computeMonthly(price: number, downPayment: number, finalPayment: number, rate: number, durationYears: number): number {
+  const financed = price - downPayment
+  const totalInterest = financed * (rate / 100) * durationYears
+  const months = durationYears * 12
+  if (months <= 0) return 0
+  return (financed - finalPayment + totalInterest) / months
+}
+
+/** Monthly interest portion (constant with simple interest). */
+function monthlyInterest(price: number, downPayment: number, rate: number): number {
+  const financed = price - downPayment
+  return financed * (rate / 100) / 12
+}
+
+export function Leases() {
+  const { db, refresh } = useDatabase()
+  const assetTypeConfig = getAssetTypeConfig(db)
+  const [dialogOpen, setDialogOpen] = useState(false)
+
+  const [name, setName] = useState('')
+  const [assetType, setAssetType] = useState<'vehicle' | 'implement' | 'building' | 'land'>('vehicle')
+  const [price, setPrice] = useState('')
+  const [durationYears, setDurationYears] = useState('3')
+  const [interestRate, setInterestRate] = useState('5')
+  const [downPayment, setDownPayment] = useState('')
+  const [finalPayment, setFinalPayment] = useState('')
+  const [startDate, setStartDate] = useState(todayISO())
+
+  const leases = getLeases(db)
+  const currentPeriod = getCurrentPeriod(db)
+  const activeLeases = leases.filter((l) => l.status === 'active')
+  const endedLeases = leases.filter((l) => l.status !== 'active')
+
+  // Computed monthly for the form
+  const pNum = parseFloat(price) || 0
+  const dpNum = parseFloat(downPayment) || 0
+  const fpNum = parseFloat(finalPayment) || 0
+  const rateNum = parseFloat(interestRate) || 0
+  const durNum = parseFloat(durationYears) || 0
+  const computedMonthly = pNum > 0 && durNum > 0 ? computeMonthly(pNum, dpNum, fpNum, rateNum, durNum) : 0
+
+  async function handleCreate(e: React.FormEvent) {
+    e.preventDefault()
+    if (!currentPeriod) return
+    if (!name || pNum <= 0 || durNum <= 0) return
+
+    const durationMonths = Math.round(durNum * 12)
+    const monthly = Math.round(computedMonthly * 100) / 100
+
+    // Create the lease
+    const leaseId = createLease(db, name, pNum, dpNum, monthly, durationMonths, fpNum, startDate, rateNum)
+
+    // Create the asset immediately at full price with normal depreciation
+    const config = assetTypeConfig[assetType]
+    createAsset(db, name, assetType, pNum, startDate, config.depYears, leaseId)
+
+    await persistDatabase()
+    refresh()
+    setDialogOpen(false)
+    resetForm()
+  }
+
+  async function handlePayment(leaseId: number) {
+    if (!currentPeriod) return
+    const lease = leases.find((l) => l.id === leaseId)
+    if (!lease || lease.payments_made >= lease.duration_months) return
+
+    // Simple interest: constant monthly interest based on original financed amount
+    const interest = Math.round(monthlyInterest(lease.total_value, lease.initial_payment, lease.interest_rate))
+    const capital = Math.round((lease.monthly_payment - interest) * 100) / 100
+
+    // Update lease: increment payments, reduce remaining_balance by capital
+    recordLeasePayment(db, leaseId, capital)
+
+    // Record ONLY the interest as expense
+    if (interest > 0) {
+      const catResult = db.exec(`SELECT id FROM category WHERE name = 'Lease Interest'`)
+      let catId = catResult[0]?.values[0]?.[0] as number | undefined
+      if (!catId) {
+        // Fall back to Lease Payment category
+        const fallback = db.exec(`SELECT id FROM category WHERE name = 'Lease Payment'`)
+        catId = fallback[0]?.values[0]?.[0] as number | undefined
+      }
+      createTransaction(db, currentPeriod.id, todayISO(), `Lease interest: ${lease.name}`, interest, 'expense', catId ?? null, null)
+    }
+
+    await persistDatabase()
+    refresh()
+  }
+
+  async function handlePurchase(leaseId: number) {
+    if (!currentPeriod) return
+    const lease = leases.find((l) => l.id === leaseId)
+    if (!lease) return
+
+    // Pay the final payment (residual value) — this zeroes the remaining_balance
+    purchaseLease(db, leaseId)
+
+    await persistDatabase()
+    refresh()
+  }
+
+  async function handleReturn(leaseId: number) {
+    if (!currentPeriod) return
+    const lease = leases.find((l) => l.id === leaseId)
+    if (!lease) return
+
+    returnLease(db, leaseId)
+
+    // Dispose of the asset (sell at $0)
+    const asset = getAssetByLeaseId(db, leaseId)
+    if (asset && !asset.sold_date) {
+      const nbv = getNetBookValue(asset)
+      sellAsset(db, asset.id, todayISO(), 0)
+
+      // Record capital loss if NBV > 0
+      if (nbv > 0) {
+        const cats = getCategories(db, 'expense')
+        const cat = cats.find((c) => c.name === 'Capital Loss')
+        createTransaction(db, currentPeriod.id, todayISO(), `Lease return loss: ${lease.name}`, nbv, 'expense', cat?.id ?? null, null)
+      }
+    }
+
+    await persistDatabase()
+    refresh()
+  }
+
+  function resetForm() {
+    setName('')
+    setAssetType('vehicle')
+    setPrice('')
+    setDurationYears('3')
+    setInterestRate('5')
+    setDownPayment('')
+    setFinalPayment('')
+    setStartDate(todayISO())
+  }
+
+  function getLeaseInterest(lease: typeof leases[0]): number {
+    return Math.round(monthlyInterest(lease.total_value, lease.initial_payment, lease.interest_rate))
+  }
+
+  function getLeaseCapital(lease: typeof leases[0]): number {
+    return Math.round((lease.monthly_payment - getLeaseInterest(lease)) * 100) / 100
+  }
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-bold">Leases</h1>
+        <Button onClick={() => { resetForm(); setDialogOpen(true) }} disabled={!currentPeriod}>
+          <Plus className="h-4 w-4" /> New Lease
+        </Button>
+      </div>
+
+      {activeLeases.length === 0 && (
+        <div className="text-muted-foreground text-sm">No active leases</div>
+      )}
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {activeLeases.map((lease) => {
+          const progressPct = (lease.payments_made / lease.duration_months) * 100
+          const isComplete = lease.payments_made >= lease.duration_months
+          const interest = getLeaseInterest(lease)
+          const capital = getLeaseCapital(lease)
+
+          return (
+            <Card key={lease.id}>
+              <CardHeader className="pb-3">
+                <div className="flex items-center justify-between">
+                  <CardTitle className="text-base">{lease.name}</CardTitle>
+                  <Badge variant={isComplete ? 'success' : 'secondary'}>
+                    {isComplete ? 'Payments Done' : `${lease.payments_made}/${lease.duration_months} months`}
+                  </Badge>
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <div className="flex justify-between text-sm">
+                  <span className="text-muted-foreground">Equipment Value</span>
+                  <span className="font-medium">{formatCurrency(lease.total_value)}</span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span className="text-muted-foreground">Remaining Debt</span>
+                  <span className="font-bold text-red-600">{formatCurrency(lease.remaining_balance)}</span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span className="text-muted-foreground">Monthly Payment</span>
+                  <span className="font-medium">{formatCurrency(lease.monthly_payment)}</span>
+                </div>
+                <div className="flex justify-between text-xs text-muted-foreground">
+                  <span>Split: {formatCurrency(capital)} capital + {formatCurrency(interest)} interest</span>
+                  <span>{formatPercent(lease.interest_rate)}</span>
+                </div>
+                {lease.residual_value > 0 && (
+                  <div className="flex justify-between text-sm">
+                    <span className="text-muted-foreground">Final Payment</span>
+                    <span className="font-medium">{formatCurrency(lease.residual_value)}</span>
+                  </div>
+                )}
+                <Progress value={progressPct} />
+                <div className="flex gap-2 flex-wrap">
+                  {!isComplete && (
+                    <Button size="sm" onClick={() => handlePayment(lease.id)} disabled={!currentPeriod}>
+                      <CreditCard className="h-4 w-4" /> Pay Installment
+                    </Button>
+                  )}
+                  {isComplete && (
+                    <>
+                      <Button size="sm" onClick={() => handlePurchase(lease.id)} disabled={!currentPeriod}>
+                        <Package className="h-4 w-4" /> Buy Out ({formatCurrency(lease.residual_value)})
+                      </Button>
+                      <Button size="sm" variant="outline" onClick={() => handleReturn(lease.id)}>
+                        <RotateCcw className="h-4 w-4" /> Return
+                      </Button>
+                    </>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+          )
+        })}
+      </div>
+
+      {endedLeases.length > 0 && (
+        <div>
+          <h2 className="text-lg font-semibold mb-3">Ended Leases</h2>
+          <Card>
+            <CardContent className="p-0">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b bg-muted/50">
+                    <th className="p-3 text-left">Name</th>
+                    <th className="p-3 text-right">Value</th>
+                    <th className="p-3 text-right">Rate</th>
+                    <th className="p-3 text-left">Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {endedLeases.map((l) => (
+                    <tr key={l.id} className="border-b">
+                      <td className="p-3">{l.name}</td>
+                      <td className="p-3 text-right">{formatCurrency(l.total_value)}</td>
+                      <td className="p-3 text-right">{formatPercent(l.interest_rate)}</td>
+                      <td className="p-3">
+                        <Badge variant={l.status === 'purchased' ? 'success' : 'secondary'}>
+                          {l.status === 'purchased' ? 'Purchased' : 'Returned'}
+                        </Badge>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+        <DialogHeader>
+          <DialogTitle>New Lease</DialogTitle>
+        </DialogHeader>
+        <form onSubmit={handleCreate} className="space-y-4">
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label>Equipment Name</Label>
+              <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="E.g.: Combine CR 10.90" required />
+            </div>
+            <div className="space-y-2">
+              <Label>Asset Type</Label>
+              <Select value={assetType} onChange={(e) => setAssetType(e.target.value as 'vehicle' | 'implement' | 'building' | 'land')}>
+                <option value="vehicle">{assetTypeConfig.vehicle.label}</option>
+                <option value="implement">{assetTypeConfig.implement.label}</option>
+                <option value="building">{assetTypeConfig.building.label}</option>
+                <option value="land">{assetTypeConfig.land.label}</option>
+              </Select>
+            </div>
+          </div>
+          <div className="space-y-2">
+            <Label>Equipment Price</Label>
+            <Input type="number" step="0.01" min="0.01" value={price} onChange={(e) => setPrice(e.target.value)} required />
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label>Duration (years)</Label>
+              <Input type="number" min="1" step="1" value={durationYears} onChange={(e) => setDurationYears(e.target.value)} required />
+            </div>
+            <div className="space-y-2">
+              <Label>Interest Rate (%)</Label>
+              <Input type="number" step="0.01" min="0" value={interestRate} onChange={(e) => setInterestRate(e.target.value)} required />
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label>Down Payment</Label>
+              <Input type="number" step="0.01" min="0" value={downPayment} onChange={(e) => setDownPayment(e.target.value)} placeholder="0" />
+            </div>
+            <div className="space-y-2">
+              <Label>Final Payment</Label>
+              <Input type="number" step="0.01" min="0" value={finalPayment} onChange={(e) => setFinalPayment(e.target.value)} placeholder="0" />
+            </div>
+          </div>
+          {computedMonthly > 0 && (
+            <div className="rounded-md bg-muted p-3 text-sm space-y-1">
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Monthly Payment</span>
+                <span className="font-bold">{formatCurrency(Math.round(computedMonthly * 100) / 100)}</span>
+              </div>
+              <div className="flex justify-between text-xs text-muted-foreground">
+                <span>Capital: {formatCurrency(Math.round((computedMonthly - monthlyInterest(pNum, dpNum, rateNum)) * 100) / 100)}</span>
+                <span>Interest: {formatCurrency(Math.round(monthlyInterest(pNum, dpNum, rateNum)))}</span>
+              </div>
+              <div className="flex justify-between text-xs text-muted-foreground">
+                <span>Total cost over lease</span>
+                <span>{formatCurrency(dpNum + Math.round(computedMonthly * 100) / 100 * durNum * 12 + fpNum)}</span>
+              </div>
+            </div>
+          )}
+          <div className="space-y-2">
+            <Label>Start Date</Label>
+            <Input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
+          </div>
+          <div className="flex justify-end gap-2">
+            <Button type="button" variant="outline" onClick={() => setDialogOpen(false)}>Cancel</Button>
+            <Button type="submit">Create Lease</Button>
+          </div>
+        </form>
+      </Dialog>
+    </div>
+  )
+}
