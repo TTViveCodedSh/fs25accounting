@@ -10,11 +10,11 @@ import {
   sellAsset,
   getCurrentPeriod,
   createTransaction,
-  getSetting,
   getAssetByLeaseId,
   getCategories,
 } from '@/db/queries'
 import { getNetBookValue } from '@/lib/calculations'
+import { getAssetTypeConfig } from '@/lib/assetConfig'
 import { persistDatabase } from '@/db/database'
 import { formatCurrency, formatPercent, todayISO } from '@/lib/utils'
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card'
@@ -27,37 +27,28 @@ import { Badge } from './ui/badge'
 import { Progress } from './ui/progress'
 import { Plus, CreditCard, Package, RotateCcw } from 'lucide-react'
 
-function getAssetTypeConfig(db: import('sql.js').Database) {
-  const depVehicle = parseInt(getSetting(db, 'dep_years_vehicle') ?? '5')
-  const depImplement = parseInt(getSetting(db, 'dep_years_implement') ?? '5')
-  const depBuilding = parseInt(getSetting(db, 'dep_years_building') ?? '10')
-  return {
-    vehicle: { label: 'Tractor / Vehicle', depYears: depVehicle as number | null },
-    implement: { label: 'Implement / Tool', depYears: depImplement as number | null },
-    building: { label: 'Building', depYears: depBuilding as number | null },
-    land: { label: 'Land', depYears: null as number | null },
-  }
-}
-
-/** Compute the fixed monthly payment for a lease (simple interest). */
+/** Compute the monthly payment using standard amortizing (annuity) formula. */
 function computeMonthly(price: number, downPayment: number, finalPayment: number, rate: number, durationYears: number): number {
   const financed = price - downPayment
-  const totalInterest = financed * (rate / 100) * durationYears
   const months = durationYears * 12
   if (months <= 0) return 0
-  return (financed - finalPayment + totalInterest) / months
+  const monthlyRate = rate / 100 / 12
+  if (monthlyRate === 0) return (financed - finalPayment) / months
+  const pvResidual = finalPayment / Math.pow(1 + monthlyRate, months)
+  return (financed - pvResidual) * monthlyRate / (1 - Math.pow(1 + monthlyRate, -months))
 }
 
-/** Monthly interest portion (constant with simple interest). */
-function monthlyInterest(price: number, downPayment: number, rate: number): number {
-  const financed = price - downPayment
-  return financed * (rate / 100) / 12
+/** Monthly interest portion based on remaining balance (declining). */
+function monthlyInterest(remainingBalance: number, rate: number): number {
+  return remainingBalance * (rate / 100) / 12
 }
 
 export function Leases() {
   const { db, refresh } = useDatabase()
   const assetTypeConfig = getAssetTypeConfig(db)
   const [dialogOpen, setDialogOpen] = useState(false)
+  const [formError, setFormError] = useState<string | null>(null)
+  const [confirmAction, setConfirmAction] = useState<{ action: () => void; description: string } | null>(null)
 
   const [name, setName] = useState('')
   const [assetType, setAssetType] = useState<'vehicle' | 'implement' | 'building' | 'land'>('vehicle')
@@ -83,8 +74,10 @@ export function Leases() {
 
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault()
-    if (!currentPeriod) return
-    if (!name || pNum <= 0 || durNum <= 0) return
+    if (!currentPeriod) { setFormError('No open period — open one first'); return }
+    if (!name) { setFormError('Please fill in all required fields'); return }
+    if (pNum <= 0) { setFormError('Amount must be greater than zero'); return }
+    if (durNum <= 0) { setFormError('Please fill in all required fields'); return }
 
     const durationMonths = Math.round(durNum * 12)
     const monthly = Math.round(computedMonthly * 100) / 100
@@ -98,6 +91,7 @@ export function Leases() {
 
     await persistDatabase()
     refresh()
+    setFormError(null)
     setDialogOpen(false)
     resetForm()
   }
@@ -107,8 +101,8 @@ export function Leases() {
     const lease = leases.find((l) => l.id === leaseId)
     if (!lease || lease.payments_made >= lease.duration_months) return
 
-    // Simple interest: constant monthly interest based on original financed amount
-    const interest = Math.round(monthlyInterest(lease.total_value, lease.initial_payment, lease.interest_rate))
+    // Declining balance interest based on remaining balance
+    const interest = Math.round(monthlyInterest(lease.remaining_balance, lease.interest_rate))
     const capital = Math.round((lease.monthly_payment - interest) * 100) / 100
 
     // Update lease: increment payments, reduce remaining_balance by capital
@@ -179,7 +173,7 @@ export function Leases() {
   }
 
   function getLeaseInterest(lease: typeof leases[0]): number {
-    return Math.round(monthlyInterest(lease.total_value, lease.initial_payment, lease.interest_rate))
+    return Math.round(monthlyInterest(lease.remaining_balance, lease.interest_rate))
   }
 
   function getLeaseCapital(lease: typeof leases[0]): number {
@@ -223,7 +217,7 @@ export function Leases() {
                 </div>
                 <div className="flex justify-between text-sm">
                   <span className="text-muted-foreground">Remaining Debt</span>
-                  <span className="font-bold text-red-600">{formatCurrency(lease.remaining_balance)}</span>
+                  <span className="font-bold text-negative">{formatCurrency(lease.remaining_balance)}</span>
                 </div>
                 <div className="flex justify-between text-sm">
                   <span className="text-muted-foreground">Monthly Payment</span>
@@ -248,10 +242,10 @@ export function Leases() {
                   )}
                   {isComplete && (
                     <>
-                      <Button size="sm" onClick={() => handlePurchase(lease.id)} disabled={!currentPeriod}>
+                      <Button size="sm" onClick={() => setConfirmAction({ action: () => handlePurchase(lease.id), description: `Buy out "${lease.name}" for ${formatCurrency(lease.residual_value)}?` })} disabled={!currentPeriod}>
                         <Package className="h-4 w-4" /> Buy Out ({formatCurrency(lease.residual_value)})
                       </Button>
-                      <Button size="sm" variant="outline" onClick={() => handleReturn(lease.id)}>
+                      <Button size="sm" variant="outline" onClick={() => setConfirmAction({ action: () => handleReturn(lease.id), description: `Return "${lease.name}"? The asset will be disposed of.` })}>
                         <RotateCcw className="h-4 w-4" /> Return
                       </Button>
                     </>
@@ -267,7 +261,7 @@ export function Leases() {
         <div>
           <h2 className="text-lg font-semibold mb-3">Ended Leases</h2>
           <Card>
-            <CardContent className="p-0">
+            <CardContent noPadding>
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b bg-muted/50">
@@ -348,8 +342,8 @@ export function Leases() {
                 <span className="font-bold">{formatCurrency(Math.round(computedMonthly * 100) / 100)}</span>
               </div>
               <div className="flex justify-between text-xs text-muted-foreground">
-                <span>Capital: {formatCurrency(Math.round((computedMonthly - monthlyInterest(pNum, dpNum, rateNum)) * 100) / 100)}</span>
-                <span>Interest: {formatCurrency(Math.round(monthlyInterest(pNum, dpNum, rateNum)))}</span>
+                <span>Capital: {formatCurrency(Math.round((computedMonthly - monthlyInterest(pNum - dpNum, rateNum)) * 100) / 100)}</span>
+                <span>Interest (1st month): {formatCurrency(Math.round(monthlyInterest(pNum - dpNum, rateNum)))}</span>
               </div>
               <div className="flex justify-between text-xs text-muted-foreground">
                 <span>Total cost over lease</span>
@@ -361,11 +355,23 @@ export function Leases() {
             <Label>Start Date</Label>
             <Input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
           </div>
+          {formError && <p className="text-xs text-negative">{formError}</p>}
           <div className="flex justify-end gap-2">
-            <Button type="button" variant="outline" onClick={() => setDialogOpen(false)}>Cancel</Button>
+            <Button type="button" variant="outline" onClick={() => { setDialogOpen(false); setFormError(null) }}>Cancel</Button>
             <Button type="submit">Create Lease</Button>
           </div>
         </form>
+      </Dialog>
+
+      <Dialog open={!!confirmAction} onOpenChange={(open) => { if (!open) setConfirmAction(null) }}>
+        <DialogHeader>
+          <DialogTitle>Are you sure?</DialogTitle>
+        </DialogHeader>
+        <p className="text-sm text-muted-foreground mb-4">{confirmAction?.description}</p>
+        <div className="flex justify-end gap-2">
+          <Button variant="outline" onClick={() => setConfirmAction(null)}>Cancel</Button>
+          <Button variant="destructive" onClick={() => { confirmAction?.action(); setConfirmAction(null) }}>Confirm</Button>
+        </div>
       </Dialog>
     </div>
   )

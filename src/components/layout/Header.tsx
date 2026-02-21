@@ -20,7 +20,7 @@ export function Header() {
       <div className="flex items-center gap-6">
         <div className="text-sm">
           <span className="text-muted-foreground">Cash:</span>{' '}
-          <span className={cash >= 0 ? 'text-green-600 font-semibold' : 'text-red-600 font-semibold'}>
+          <span className={cash >= 0 ? 'text-positive font-semibold' : 'text-negative font-semibold'}>
             {formatCurrency(cash)}
           </span>
         </div>

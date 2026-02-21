@@ -20,6 +20,7 @@ export function Loans() {
   const [repayAmount, setRepayAmount] = useState('')
   const [expandedLoan, setExpandedLoan] = useState<number | null>(null)
 
+  const [formError, setFormError] = useState<string | null>(null)
   const [name, setName] = useState('')
   const [principal, setPrincipal] = useState('')
   const [interestRate, setInterestRate] = useState('4')
@@ -32,16 +33,19 @@ export function Loans() {
 
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault()
-    if (!currentPeriod) return
+    if (!currentPeriod) { setFormError('No open period — open one first'); return }
+    if (!name) { setFormError('Please fill in all required fields'); return }
     const p = parseFloat(principal)
     const ir = parseFloat(interestRate)
-    if (!name || isNaN(p) || isNaN(ir)) return
+    if (isNaN(p) || p <= 0) { setFormError('Amount must be greater than zero'); return }
+    if (isNaN(ir)) { setFormError('Please fill in all required fields'); return }
 
     // monthly_payment stored as 0 — interest is computed dynamically
     createLoan(db, name, p, ir, 0, startDate)
 
     await persistDatabase()
     refresh()
+    setFormError(null)
     setDialogOpen(false)
     setName('')
     setPrincipal('')
@@ -136,13 +140,13 @@ export function Loans() {
                 </div>
                 <div className="flex justify-between text-sm">
                   <span className="text-muted-foreground">Remaining Balance</span>
-                  <span className="font-bold text-red-600">{formatCurrency(loan.remaining_balance)}</span>
+                  <span className="font-bold text-negative">{formatCurrency(loan.remaining_balance)}</span>
                 </div>
                 <div className="flex justify-between text-sm">
                   <span className="text-muted-foreground">Monthly Interest</span>
                   <span className="font-medium">{formatCurrency(monthlyInterest)}</span>
                 </div>
-                <Progress value={progressPct} indicatorClassName="bg-green-500" />
+                <Progress value={progressPct} indicatorClassName="bg-positive" />
                 <div className="text-xs text-muted-foreground text-right">
                   {formatCurrency(paidOff)} repaid out of {formatCurrency(loan.principal)}
                 </div>
@@ -196,7 +200,7 @@ export function Loans() {
         <div>
           <h2 className="text-lg font-semibold mb-3">Paid Off Loans</h2>
           <Card>
-            <CardContent className="p-0">
+            <CardContent noPadding>
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b bg-muted/50">
@@ -249,8 +253,9 @@ export function Loans() {
             <Label>Start Date</Label>
             <Input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
           </div>
+          {formError && <p className="text-xs text-negative">{formError}</p>}
           <div className="flex justify-end gap-2">
-            <Button type="button" variant="outline" onClick={() => setDialogOpen(false)}>Cancel</Button>
+            <Button type="button" variant="outline" onClick={() => { setDialogOpen(false); setFormError(null) }}>Cancel</Button>
             <Button type="submit">Create</Button>
           </div>
         </form>

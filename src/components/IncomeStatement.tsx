@@ -69,7 +69,7 @@ function SectionLine({
   defaultExpanded?: boolean
 }) {
   const [expanded, setExpanded] = useState(defaultExpanded)
-  const colorClass = color === 'green' ? 'text-green-600' : color === 'red' ? 'text-red-600' : 'text-muted-foreground'
+  const colorClass = color === 'green' ? 'text-positive' : color === 'red' ? 'text-negative' : 'text-muted-foreground'
 
   if (rows.length === 0 && total === 0) {
     return (
@@ -187,7 +187,7 @@ export function IncomeStatement() {
           />
           <div className="border-t pt-2 flex justify-between font-bold text-sm">
             <span>Operating Result</span>
-            <span className={operatingResult >= 0 ? 'text-green-600' : 'text-red-600'}>
+            <span className={operatingResult >= 0 ? 'text-positive' : 'text-negative'}>
               {formatCurrency(operatingResult)}
             </span>
           </div>
@@ -203,7 +203,7 @@ export function IncomeStatement() {
           <SectionLine label="Expenses" total={financialExpenses} rows={expSections.financial} color="red" />
           <div className="border-t pt-2 flex justify-between font-bold text-sm">
             <span>Financial Result</span>
-            <span className={financialResult >= 0 ? 'text-green-600' : 'text-red-600'}>
+            <span className={financialResult >= 0 ? 'text-positive' : 'text-negative'}>
               {formatCurrency(financialResult)}
             </span>
           </div>
@@ -220,7 +220,7 @@ export function IncomeStatement() {
           <SectionLine label="Expenses" total={exceptionalExpenses} rows={expSections.exceptional} color="red" />
           <div className="border-t pt-2 flex justify-between font-bold text-sm">
             <span>Exceptional Result</span>
-            <span className={exceptionalResult >= 0 ? 'text-green-600' : 'text-red-600'}>
+            <span className={exceptionalResult >= 0 ? 'text-positive' : 'text-negative'}>
               {formatCurrency(exceptionalResult)}
             </span>
           </div>
@@ -231,7 +231,7 @@ export function IncomeStatement() {
       <Card>
         <CardContent className="p-4 flex justify-between items-center">
           <span className="text-sm font-medium text-muted-foreground">Profit Before Tax</span>
-          <span className={`text-xl font-bold ${profitBeforeTax >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+          <span className={`text-xl font-bold ${profitBeforeTax >= 0 ? 'text-positive' : 'text-negative'}`}>
             {profitBeforeTax >= 0 ? '+' : ''}{formatCurrency(profitBeforeTax)}
           </span>
         </CardContent>
@@ -242,16 +242,16 @@ export function IncomeStatement() {
         <Card>
           <CardContent className="p-4 flex justify-between items-center">
             <span className="text-sm font-medium text-muted-foreground">Corporate Tax</span>
-            <span className="text-xl font-bold text-red-600">-{formatCurrency(taxExpenses)}</span>
+            <span className="text-xl font-bold text-negative">-{formatCurrency(taxExpenses)}</span>
           </CardContent>
         </Card>
       )}
 
       {/* Net Profit */}
-      <Card className={netProfit >= 0 ? 'border-green-200 bg-green-50 dark:border-green-800 dark:bg-green-950' : 'border-red-200 bg-red-50 dark:border-red-800 dark:bg-red-950'}>
+      <Card className={netProfit >= 0 ? 'border-positive/30 bg-positive/5 dark:border-positive/30 dark:bg-positive/10' : 'border-negative/30 bg-negative/5 dark:border-negative/30 dark:bg-negative/10'}>
         <CardContent className="p-6 flex justify-between items-center">
           <span className="text-sm font-medium text-muted-foreground">Net Profit</span>
-          <span className={`text-3xl font-bold ${netProfit >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+          <span className={`text-3xl font-bold ${netProfit >= 0 ? 'text-positive' : 'text-negative'}`}>
             {netProfit >= 0 ? '+' : ''}{formatCurrency(netProfit)}
           </span>
         </CardContent>

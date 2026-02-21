@@ -8,6 +8,7 @@ import { Card, CardContent } from './ui/card'
 import { Button } from './ui/button'
 import { Input } from './ui/input'
 import { Badge } from './ui/badge'
+import { Dialog, DialogHeader, DialogTitle } from './ui/dialog'
 import { Trash2, Search } from 'lucide-react'
 
 // --- Category group definitions ---
@@ -66,6 +67,8 @@ export function Transactions() {
   const [selectedCat, setSelectedCat] = useState<Category | null>(null)
   const [amount, setAmount] = useState('')
   const [notes, setNotes] = useState('')
+  const [formError, setFormError] = useState<string | null>(null)
+  const [confirmDelete, setConfirmDelete] = useState<{ id: number; label: string } | null>(null)
   const amountRef = useRef<HTMLInputElement>(null)
 
   const currentPeriod = getCurrentPeriod(db)
@@ -91,13 +94,15 @@ export function Transactions() {
 
   async function handleAdd(e: React.FormEvent) {
     e.preventDefault()
-    if (!currentPeriod || !selectedCat) return
+    if (!currentPeriod) { setFormError('No open period — open one first'); return }
+    if (!selectedCat) { setFormError('Please fill in all required fields'); return }
     const a = parseFloat(amount)
-    if (isNaN(a) || a <= 0) return
+    if (isNaN(a) || a <= 0) { setFormError('Amount must be greater than zero'); return }
 
     createTransaction(db, currentPeriod.id, todayISO(), selectedCat.name, a, selectedCat.type, selectedCat.id, notes || null)
     await persistDatabase()
     refresh()
+    setFormError(null)
     setAmount('')
     setNotes('')
     setSelectedCat(null)
@@ -134,17 +139,15 @@ export function Transactions() {
               <div className="flex gap-1">
                 <Button
                   variant={tab === 'revenue' ? 'default' : 'outline'}
-                  size="sm"
+                  size="xs"
                   onClick={() => { setTab('revenue'); setSelectedCat(null) }}
-                  className="text-xs h-7 px-3"
                 >
                   Revenue
                 </Button>
                 <Button
                   variant={tab === 'expense' ? 'default' : 'outline'}
-                  size="sm"
+                  size="xs"
                   onClick={() => { setTab('expense'); setSelectedCat(null) }}
-                  className="text-xs h-7 px-3"
                 >
                   Expense
                 </Button>
@@ -181,11 +184,11 @@ export function Transactions() {
                           className={`inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-xs font-medium transition-colors ${
                             selectedCat?.id === cat.id
                               ? tab === 'revenue'
-                                ? 'bg-green-100 border-green-500 dark:bg-green-900 dark:border-green-500'
-                                : 'bg-red-100 border-red-500 dark:bg-red-900 dark:border-red-500'
+                                ? 'bg-positive/15 border-positive dark:bg-positive/20 dark:border-positive'
+                                : 'bg-negative/15 border-negative dark:bg-negative/20 dark:border-negative'
                               : tab === 'revenue'
-                                ? 'border-green-200 hover:bg-green-50 dark:border-green-800 dark:hover:bg-green-950'
-                                : 'border-red-200 hover:bg-red-50 dark:border-red-800 dark:hover:bg-red-950'
+                                ? 'border-positive/30 hover:bg-positive/5 dark:border-positive/30 dark:hover:bg-positive/10'
+                                : 'border-negative/30 hover:bg-negative/5 dark:border-negative/30 dark:hover:bg-negative/10'
                           }`}
                         >
                           <span className="text-[11px]">{cat.icon}</span>
@@ -212,7 +215,7 @@ export function Transactions() {
                   min="0.01"
                   placeholder="Amount"
                   value={amount}
-                  onChange={(e) => setAmount(e.target.value)}
+                  onChange={(e) => { setAmount(e.target.value); setFormError(null) }}
                   className="h-8 w-28 text-sm"
                   required
                 />
@@ -223,18 +226,19 @@ export function Transactions() {
                   className="h-8 flex-1 text-sm"
                 />
                 <Button type="submit" size="sm" className="h-8 shrink-0">Add</Button>
-                <Button type="button" variant="ghost" size="sm" className="h-8 shrink-0" onClick={() => setSelectedCat(null)}>
+                <Button type="button" variant="ghost" size="sm" className="h-8 shrink-0" onClick={() => { setSelectedCat(null); setFormError(null) }}>
                   Cancel
                 </Button>
               </form>
             )}
+            {formError && <p className="text-xs text-negative mt-1">{formError}</p>}
           </CardContent>
         </Card>
       )}
 
       {/* Transaction list */}
       <Card>
-        <CardContent className="p-0">
+        <CardContent noPadding>
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
@@ -268,11 +272,11 @@ export function Transactions() {
                             </Badge>
                           </div>
                         </td>
-                        <td className={`p-3 text-right font-semibold whitespace-nowrap ${t.type === 'revenue' ? 'text-green-600' : 'text-red-600'}`}>
+                        <td className={`p-3 text-right font-semibold whitespace-nowrap ${t.type === 'revenue' ? 'text-positive' : 'text-negative'}`}>
                           {t.type === 'revenue' ? '+' : '-'}{formatCurrency(t.amount)}
                         </td>
                         <td className="p-3">
-                          <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => handleDelete(t.id)}>
+                          <Button variant="ghost" size="icon-sm" onClick={() => setConfirmDelete({ id: t.id, label: cat?.name ?? t.label })}>
                             <Trash2 className="h-3.5 w-3.5 text-muted-foreground" />
                           </Button>
                         </td>
@@ -285,6 +289,19 @@ export function Transactions() {
           </div>
         </CardContent>
       </Card>
+
+      <Dialog open={!!confirmDelete} onOpenChange={(open) => { if (!open) setConfirmDelete(null) }}>
+        <DialogHeader>
+          <DialogTitle>Delete Transaction</DialogTitle>
+        </DialogHeader>
+        <p className="text-sm text-muted-foreground mb-4">
+          Are you sure you want to delete "{confirmDelete?.label}"? This cannot be undone.
+        </p>
+        <div className="flex justify-end gap-2">
+          <Button variant="outline" onClick={() => setConfirmDelete(null)}>Cancel</Button>
+          <Button variant="destructive" onClick={() => { if (confirmDelete) handleDelete(confirmDelete.id); setConfirmDelete(null) }}>Delete</Button>
+        </div>
+      </Dialog>
     </div>
   )
 }

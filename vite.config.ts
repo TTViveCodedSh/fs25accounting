@@ -25,6 +25,7 @@ function sqlJsWasmInlinePlugin(): Plugin {
 }
 
 export default defineConfig({
+  build: { outDir: 'docs' },
   plugins: [sqlJsWasmInlinePlugin(), react(), tailwindcss(), viteSingleFile()],
   resolve: {
     alias: {

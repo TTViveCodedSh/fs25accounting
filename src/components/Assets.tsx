@@ -1,7 +1,8 @@
 import { useState } from 'react'
 import { useDatabase } from '@/hooks/useDatabase'
-import { getAssets, createAsset, sellAsset, getCurrentPeriod, createTransaction, getCategories, getSetting } from '@/db/queries'
+import { getAssets, createAsset, sellAsset, getCurrentPeriod, createTransaction, getCategories } from '@/db/queries'
 import { getDepreciation, getNetBookValue } from '@/lib/calculations'
+import { getAssetTypeConfig } from '@/lib/assetConfig'
 import { persistDatabase } from '@/db/database'
 import { formatCurrency, todayISO } from '@/lib/utils'
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card'
@@ -12,19 +13,7 @@ import { Select } from './ui/select'
 import { Dialog, DialogHeader, DialogTitle } from './ui/dialog'
 import { Badge } from './ui/badge'
 import { Progress } from './ui/progress'
-import { Plus, Truck, Wrench, Building, MapPin } from 'lucide-react'
-
-function getAssetTypeConfig(db: import('sql.js').Database) {
-  const depVehicle = parseInt(getSetting(db, 'dep_years_vehicle') ?? '5')
-  const depImplement = parseInt(getSetting(db, 'dep_years_implement') ?? '5')
-  const depBuilding = parseInt(getSetting(db, 'dep_years_building') ?? '10')
-  return {
-    vehicle: { label: 'Tractor / Vehicle', icon: Truck, depYears: depVehicle as number | null },
-    implement: { label: 'Implement / Tool', icon: Wrench, depYears: depImplement as number | null },
-    building: { label: 'Building', icon: Building, depYears: depBuilding as number | null },
-    land: { label: 'Land', icon: MapPin, depYears: null as number | null },
-  }
-}
+import { Plus } from 'lucide-react'
 
 export function Assets() {
   const { db, refresh } = useDatabase()
@@ -41,6 +30,8 @@ export function Assets() {
 
   const [sellPrice, setSellPrice] = useState('')
   const [sellDate, setSellDate] = useState(todayISO())
+  const [formError, setFormError] = useState<string | null>(null)
+  const [confirmSell, setConfirmSell] = useState(false)
 
   const assets = getAssets(db)
   const currentPeriod = getCurrentPeriod(db)
@@ -50,15 +41,17 @@ export function Assets() {
 
   async function handleBuy(e: React.FormEvent) {
     e.preventDefault()
-    if (!currentPeriod) return
+    if (!currentPeriod) { setFormError('No open period — open one first'); return }
+    if (!name) { setFormError('Please fill in all required fields'); return }
     const p = parseFloat(price)
-    if (!name || isNaN(p) || p <= 0) return
+    if (isNaN(p) || p <= 0) { setFormError('Amount must be greater than zero'); return }
 
     const config = assetTypeConfig[assetType]
     createAsset(db, name, assetType, p, purchaseDate, config.depYears, null)
 
     await persistDatabase()
     refresh()
+    setFormError(null)
     setBuyDialogOpen(false)
     setName('')
     setPrice('')
@@ -66,8 +59,15 @@ export function Assets() {
     setPurchaseDate(todayISO())
   }
 
-  async function handleSell(e: React.FormEvent) {
-    e.preventDefault()
+  function validateSell(): boolean {
+    if (!currentPeriod) { setFormError('No open period — open one first'); return false }
+    if (!sellAssetId) return false
+    const sp = parseFloat(sellPrice)
+    if (isNaN(sp) || sp < 0) { setFormError('Amount must be greater than zero'); return false }
+    return true
+  }
+
+  async function executeSell() {
     if (!currentPeriod || !sellAssetId) return
     const sp = parseFloat(sellPrice)
     if (isNaN(sp) || sp < 0) return
@@ -92,6 +92,7 @@ export function Assets() {
 
     await persistDatabase()
     refresh()
+    setFormError(null)
     setSellDialogOpen(false)
     setSellAssetId(null)
     setSellPrice('')
@@ -149,7 +150,7 @@ export function Assets() {
                   <>
                     <div className="flex justify-between text-sm">
                       <span className="text-muted-foreground">Depreciation</span>
-                      <span className="text-red-500">-{formatCurrency(dep)}</span>
+                      <span className="text-negative">-{formatCurrency(dep)}</span>
                     </div>
                     <Progress value={depPercent} />
                     <div className="flex justify-between text-sm">
@@ -224,7 +225,7 @@ export function Assets() {
         <div>
           <h2 className="text-lg font-semibold mb-3">Sold Assets</h2>
           <Card>
-            <CardContent className="p-0">
+            <CardContent noPadding>
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b bg-muted/50">
@@ -246,7 +247,7 @@ export function Assets() {
                         <td className="p-3">{assetTypeConfig[a.asset_type].label}</td>
                         <td className="p-3 text-right">{formatCurrency(a.purchase_price)}</td>
                         <td className="p-3 text-right">{formatCurrency(a.sold_price ?? 0)}</td>
-                        <td className={`p-3 text-right font-semibold ${gainLoss >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                        <td className={`p-3 text-right font-semibold ${gainLoss >= 0 ? 'text-positive' : 'text-negative'}`}>
                           {gainLoss >= 0 ? '+' : ''}{formatCurrency(gainLoss)}
                         </td>
                       </tr>
@@ -287,8 +288,9 @@ export function Assets() {
             <Label>Purchase price</Label>
             <Input type="number" step="0.01" min="0.01" value={price} onChange={(e) => setPrice(e.target.value)} required />
           </div>
+          {formError && <p className="text-xs text-negative">{formError}</p>}
           <div className="flex justify-end gap-2">
-            <Button type="button" variant="outline" onClick={() => setBuyDialogOpen(false)}>Cancel</Button>
+            <Button type="button" variant="outline" onClick={() => { setBuyDialogOpen(false); setFormError(null) }}>Cancel</Button>
             <Button type="submit">Buy</Button>
           </div>
         </form>
@@ -298,7 +300,7 @@ export function Assets() {
         <DialogHeader>
           <DialogTitle>Sell Asset</DialogTitle>
         </DialogHeader>
-        <form onSubmit={handleSell} className="space-y-4">
+        <form onSubmit={(e) => { e.preventDefault(); if (validateSell()) setConfirmSell(true) }} className="space-y-4">
           {sellAssetId && (() => {
             const asset = assets.find((a) => a.id === sellAssetId)
             if (!asset) return null
@@ -320,11 +322,25 @@ export function Assets() {
               <Input type="date" value={sellDate} onChange={(e) => setSellDate(e.target.value)} />
             </div>
           </div>
+          {formError && <p className="text-xs text-negative">{formError}</p>}
           <div className="flex justify-end gap-2">
-            <Button type="button" variant="outline" onClick={() => setSellDialogOpen(false)}>Cancel</Button>
+            <Button type="button" variant="outline" onClick={() => { setSellDialogOpen(false); setFormError(null) }}>Cancel</Button>
             <Button type="submit">Sell</Button>
           </div>
         </form>
+      </Dialog>
+
+      <Dialog open={confirmSell} onOpenChange={setConfirmSell}>
+        <DialogHeader>
+          <DialogTitle>Confirm Sale</DialogTitle>
+        </DialogHeader>
+        <p className="text-sm text-muted-foreground mb-4">
+          Are you sure you want to sell this asset for {formatCurrency(parseFloat(sellPrice) || 0)}? This cannot be undone.
+        </p>
+        <div className="flex justify-end gap-2">
+          <Button variant="outline" onClick={() => setConfirmSell(false)}>Cancel</Button>
+          <Button variant="destructive" onClick={() => { setConfirmSell(false); executeSell() }}>Confirm Sale</Button>
+        </div>
       </Dialog>
     </div>
   )

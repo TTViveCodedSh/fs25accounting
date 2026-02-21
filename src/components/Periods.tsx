@@ -53,7 +53,7 @@ export function Periods() {
   }
 
   async function handleCloseMonth() {
-    if (!currentPeriod) return
+    if (!currentPeriod || currentPeriod.closed_at) return
 
     // Book depreciation first so the snapshot reflects updated NBVs
     const depBooked = bookPeriodDepreciation(db)
@@ -197,7 +197,7 @@ export function Periods() {
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold">Periods</h1>
         <div className="flex gap-2">
-          {currentPeriod && (
+          {currentPeriod && !currentPeriod.closed_at && (
             <Button variant="outline" onClick={handleCloseMonth}>
               <Lock className="h-4 w-4" /> Close Month
             </Button>
@@ -269,25 +269,25 @@ export function Periods() {
               {/* P&L summary */}
               <div className="flex justify-between text-sm">
                 <span>Total Revenue</span>
-                <span className="text-green-600 font-medium">{formatCurrency(fyRevenue)}</span>
+                <span className="text-positive font-medium">{formatCurrency(fyRevenue)}</span>
               </div>
               <div className="flex justify-between text-sm">
                 <span>Total Expenses</span>
-                <span className="text-red-600 font-medium">{formatCurrency(fyExpenses)}</span>
+                <span className="text-negative font-medium">{formatCurrency(fyExpenses)}</span>
               </div>
               <div className="flex justify-between text-sm">
                 <span>Depreciation</span>
-                <span className="text-red-600 font-medium">{formatCurrency(fyDepreciation)}</span>
+                <span className="text-negative font-medium">{formatCurrency(fyDepreciation)}</span>
               </div>
               <div className="border-t pt-2 flex justify-between font-bold">
                 <span>Net Profit</span>
-                <span className={fyNetProfit >= 0 ? 'text-green-600' : 'text-red-600'}>
+                <span className={fyNetProfit >= 0 ? 'text-positive' : 'text-negative'}>
                   {formatCurrency(fyNetProfit)}
                 </span>
               </div>
 
               {accLosses > 0 && (
-                <div className="flex justify-between text-sm text-yellow-700 dark:text-yellow-400">
+                <div className="flex justify-between text-sm text-warning">
                   <span>Accumulated Losses (carried forward)</span>
                   <span>-{formatCurrency(accLosses)}</span>
                 </div>
@@ -303,7 +303,7 @@ export function Periods() {
               {taxAmount > 0 && (
                 <div className="flex justify-between text-sm">
                   <span>Corporate Tax ({(taxRate * 100).toFixed(0)}%)</span>
-                  <span className="text-red-600 font-medium">-{formatCurrency(taxAmount)}</span>
+                  <span className="text-negative font-medium">-{formatCurrency(taxAmount)}</span>
                 </div>
               )}
 
@@ -315,7 +315,7 @@ export function Periods() {
               )}
 
               {fyNetProfit < 0 && (
-                <div className="text-sm text-red-600">
+                <div className="text-sm text-negative">
                   The loss of {formatCurrency(Math.abs(fyNetProfit))} will be carried forward.
                 </div>
               )}
@@ -356,18 +356,18 @@ export function Periods() {
               <div className="space-y-1 text-sm">
                 <div className="flex justify-between">
                   <span>Net Profit</span>
-                  <span className={fyNetProfit >= 0 ? 'text-green-600' : 'text-red-600'}>{formatCurrency(fyNetProfit)}</span>
+                  <span className={fyNetProfit >= 0 ? 'text-positive' : 'text-negative'}>{formatCurrency(fyNetProfit)}</span>
                 </div>
                 {taxAmount > 0 && (
                   <div className="flex justify-between">
                     <span>Corporate Tax</span>
-                    <span className="text-red-600">-{formatCurrency(taxAmount)}</span>
+                    <span className="text-negative">-{formatCurrency(taxAmount)}</span>
                   </div>
                 )}
                 {clampedDividend > 0 && (
                   <div className="flex justify-between">
                     <span>Dividends</span>
-                    <span className="text-red-600">-{formatCurrency(clampedDividend)}</span>
+                    <span className="text-negative">-{formatCurrency(clampedDividend)}</span>
                   </div>
                 )}
                 <div className="border-t pt-1 flex justify-between font-medium">

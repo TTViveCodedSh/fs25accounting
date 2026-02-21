@@ -7,6 +7,7 @@ import { Badge } from './ui/badge'
 import { Tooltip as InfoTooltip } from './ui/tooltip'
 import { Info } from 'lucide-react'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, Cell } from 'recharts'
+import { CHART_TOOLTIP_STYLE } from '@/lib/chartConfig'
 
 export function Shares() {
   const { db } = useDatabase()
@@ -92,7 +93,7 @@ export function Shares() {
             <div className="text-sm text-muted-foreground">
               Initial: {formatCurrency(investorInitial)}
             </div>
-            <div className={`text-sm font-semibold ${investorReturn >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+            <div className={`text-sm font-semibold ${investorReturn >= 0 ? 'text-positive' : 'text-negative'}`}>
               {investorReturn >= 0 ? '+' : ''}{investorReturn.toFixed(1)}%
             </div>
           </CardContent>
@@ -143,7 +144,7 @@ export function Shares() {
                 <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
                 <XAxis type="number" tickFormatter={(v: number) => formatCurrency(v)} fontSize={12} tick={{ fill: 'var(--color-muted-foreground)' }} />
                 <YAxis type="category" dataKey="name" width={100} fontSize={12} tick={{ fill: 'var(--color-muted-foreground)' }} />
-                <Tooltip formatter={(v) => formatCurrency(Number(v))} contentStyle={{ backgroundColor: 'var(--color-card)', border: '1px solid var(--color-border)', borderRadius: '8px', color: 'var(--color-foreground)' }} />
+                <Tooltip formatter={(v) => formatCurrency(Number(v))} contentStyle={CHART_TOOLTIP_STYLE} />
                 <Bar dataKey="value" name="Amount">
                   {breakdownData.map((entry, i) => (
                     <Cell key={i} fill={entry.value >= 0 ? 'var(--color-chart-2)' : 'var(--color-destructive)'} />

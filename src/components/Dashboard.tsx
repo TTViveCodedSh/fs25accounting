@@ -9,6 +9,7 @@ import { TrendingUp, TrendingDown, Wallet, BarChart3, PieChart, Calendar } from 
 import { Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line, ComposedChart, ReferenceLine } from 'recharts'
 import { useNavigate } from 'react-router-dom'
 import { Button } from './ui/button'
+import { CHART_TOOLTIP_STYLE } from '@/lib/chartConfig'
 import { useState } from 'react'
 
 export function Dashboard() {
@@ -24,7 +25,7 @@ export function Dashboard() {
   const fiscalYears = getFiscalYears(db)
 
   const lastSnapshot = snapshots.length > 1 ? snapshots[snapshots.length - 2] : null
-  const priceChange = lastSnapshot ? ((sharePrice - lastSnapshot.share_price) / lastSnapshot.share_price) * 100 : 0
+  const priceChange = lastSnapshot && lastSnapshot.share_price > 0 ? ((sharePrice - lastSnapshot.share_price) / lastSnapshot.share_price) * 100 : 0
 
   // Chart fiscal year selector
   const [chartFYId, setChartFYId] = useState<number>(fy?.id ?? fiscalYears[fiscalYears.length - 1]?.id ?? 0)
@@ -74,7 +75,7 @@ export function Dashboard() {
             <Wallet className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className={`text-2xl font-bold ${cash >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+            <div className={`text-2xl font-bold ${cash >= 0 ? 'text-positive' : 'text-negative'}`}>
               {formatCurrency(cash)}
             </div>
           </CardContent>
@@ -88,7 +89,7 @@ export function Dashboard() {
           <CardContent>
             <div className="text-2xl font-bold">{formatCurrency(sharePrice)}</div>
             {priceChange !== 0 && (
-              <div className={`flex items-center gap-1 text-xs ${priceChange > 0 ? 'text-green-600' : 'text-red-600'}`}>
+              <div className={`flex items-center gap-1 text-xs ${priceChange > 0 ? 'text-positive' : 'text-negative'}`}>
                 {priceChange > 0 ? <TrendingUp className="h-3 w-3" /> : <TrendingDown className="h-3 w-3" />}
                 {priceChange > 0 ? '+' : ''}{priceChange.toFixed(1)}%
               </div>
@@ -144,25 +145,25 @@ export function Dashboard() {
         <Card>
           <CardContent className="pt-6">
             <div className="text-xs font-medium text-muted-foreground uppercase">Total Revenue</div>
-            <div className="text-xl font-bold text-green-600">{formatCurrency(yearRevenue)}</div>
+            <div className="text-xl font-bold text-positive">{formatCurrency(yearRevenue)}</div>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="pt-6">
             <div className="text-xs font-medium text-muted-foreground uppercase">Total Expenses</div>
-            <div className="text-xl font-bold text-red-600">{formatCurrency(yearExpenses)}</div>
+            <div className="text-xl font-bold text-negative">{formatCurrency(yearExpenses)}</div>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="pt-6">
             <div className="text-xs font-medium text-muted-foreground uppercase">Depreciation</div>
-            <div className="text-xl font-bold text-orange-600">{formatCurrency(yearDepreciation)}</div>
+            <div className="text-xl font-bold text-warning">{formatCurrency(yearDepreciation)}</div>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="pt-6">
             <div className="text-xs font-medium text-muted-foreground uppercase">Net Profit</div>
-            <div className={`text-xl font-bold ${yearProfit >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+            <div className={`text-xl font-bold ${yearProfit >= 0 ? 'text-positive' : 'text-negative'}`}>
               {yearProfit >= 0 ? '+' : ''}{formatCurrency(yearProfit)}
             </div>
           </CardContent>
@@ -184,7 +185,7 @@ export function Dashboard() {
                   <YAxis fontSize={12} tick={{ fill: 'var(--color-muted-foreground)' }} />
                   <Tooltip
                     formatter={(v) => formatCurrency(Number(v))}
-                    contentStyle={{ backgroundColor: 'var(--color-card)', border: '1px solid var(--color-border)', borderRadius: '8px', color: 'var(--color-foreground)' }}
+                    contentStyle={CHART_TOOLTIP_STYLE}
                   />
                   <ReferenceLine y={0} stroke="var(--color-muted-foreground)" strokeDasharray="3 3" />
                   <Bar dataKey="revenue" name="Revenue" fill="var(--color-chart-2)" radius={[2, 2, 0, 0]} />
@@ -213,7 +214,7 @@ export function Dashboard() {
                   <YAxis fontSize={12} tick={{ fill: 'var(--color-muted-foreground)' }} />
                   <Tooltip
                     formatter={(v) => formatCurrency(Number(v))}
-                    contentStyle={{ backgroundColor: 'var(--color-card)', border: '1px solid var(--color-border)', borderRadius: '8px', color: 'var(--color-foreground)' }}
+                    contentStyle={CHART_TOOLTIP_STYLE}
                   />
                   <Line type="monotone" dataKey="cash" name="Cash" stroke="var(--color-chart-2)" strokeWidth={2} dot={{ r: 3 }} />
                   <Line type="monotone" dataKey="valuation" name="Valuation" stroke="var(--color-primary)" strokeWidth={2} dot={{ r: 3 }} />
@@ -269,7 +270,7 @@ export function Dashboard() {
                     <div className="text-sm font-medium">{t.label}</div>
                     <div className="text-xs text-muted-foreground">{t.date}</div>
                   </div>
-                  <div className={`text-sm font-semibold ${t.type === 'revenue' ? 'text-green-600' : 'text-red-600'}`}>
+                  <div className={`text-sm font-semibold ${t.type === 'revenue' ? 'text-positive' : 'text-negative'}`}>
                     {t.type === 'revenue' ? '+' : '-'}{formatCurrency(t.amount)}
                   </div>
                 </div>

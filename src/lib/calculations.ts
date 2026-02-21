@@ -80,6 +80,7 @@ export function getValuation(db: Database): number {
 
 export function getSharePrice(db: Database): number {
   const totalShares = Number(getSetting(db, 'total_shares') ?? '5000')
+  if (totalShares <= 0) return 0
   const valuation = getValuation(db)
   return valuation / totalShares
 }

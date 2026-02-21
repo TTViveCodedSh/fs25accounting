@@ -73,7 +73,7 @@ export function BalanceSheet() {
               {currentProfit !== 0 && (
                 <div className="flex justify-between text-sm pl-2">
                   <span>Current Year Profit</span>
-                  <span className={currentProfit >= 0 ? 'font-medium text-green-600' : 'font-medium text-red-600'}>
+                  <span className={currentProfit >= 0 ? 'font-medium text-positive' : 'font-medium text-negative'}>
                     {formatCurrency(currentProfit)}
                   </span>
                 </div>
@@ -81,7 +81,7 @@ export function BalanceSheet() {
               {accLosses !== 0 && (
                 <div className="flex justify-between text-sm pl-2">
                   <span>Retained Losses</span>
-                  <span className="font-medium text-red-600">-{formatCurrency(Math.abs(accLosses))}</span>
+                  <span className="font-medium text-negative">-{formatCurrency(Math.abs(accLosses))}</span>
                 </div>
               )}
             </div>
@@ -105,8 +105,8 @@ export function BalanceSheet() {
       </div>
 
       {diff > 1 && (
-        <Card className="border-yellow-200 bg-yellow-50 dark:border-yellow-800 dark:bg-yellow-950">
-          <CardContent className="p-4 text-sm text-yellow-800 dark:text-yellow-200">
+        <Card className="border-warning/30 bg-warning/5 dark:border-warning/30 dark:bg-warning/10">
+          <CardContent className="p-4 text-sm text-warning">
             Warning: balance sheet does not balance. Difference: {formatCurrency(diff)}
           </CardContent>
         </Card>
