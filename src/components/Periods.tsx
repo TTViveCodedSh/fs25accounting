@@ -16,6 +16,7 @@ import {
   createTransaction,
   createValuationSnapshot,
   bookPeriodDepreciation,
+  processLeasePayments,
   getActiveAssets,
   getCategories,
   getMonthName,
@@ -48,6 +49,12 @@ export function Periods() {
     const periods = getPeriods(db, currentFY.id)
     const monthName = getMonthName(startMonth, periods.length)
     createPeriod(db, currentFY.id, monthName, todayISO())
+
+    // Process automatic lease installments for the new month
+    const allPeriods = getPeriods(db, currentFY.id)
+    const newPeriod = allPeriods[allPeriods.length - 1]
+    processLeasePayments(db, newPeriod.id, todayISO())
+
     await persistDatabase()
     refresh()
   }
@@ -160,10 +167,11 @@ export function Periods() {
     const closedMonths = periods.filter((p) => p.closed_at).length
     const remainingMonths = 12 - closedMonths
 
-    // Close current period, booking all remaining months of depreciation
+    // Close current period, booking remaining depreciation and lease payments
     const activePeriod = getPeriods(db, currentFY.id).find((p) => !p.closed_at)
     if (activePeriod) {
       const depBooked = remainingMonths > 0 ? bookPeriodDepreciation(db, remainingMonths) : 0
+      if (remainingMonths > 0) processLeasePayments(db, activePeriod.id, todayISO(), remainingMonths)
 
       const cash = getCashBalance(db)
       const assetsNBV = getTotalAssetsNBV(db)

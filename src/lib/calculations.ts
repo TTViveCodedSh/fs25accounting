@@ -13,6 +13,7 @@ import {
   totalLoanPrincipalPayments,
   totalLoanProceeds,
   totalLeaseCapitalOutflow,
+  sumNonCashPnL,
 } from '@/db/queries'
 
 export function getDepreciation(asset: Asset): number {
@@ -57,10 +58,15 @@ export function getCashBalance(db: Database): number {
   // (interest is already in expenses as transactions)
   const leaseCapital = totalLeaseCapitalOutflow(db)
 
+  // Capital gains/losses are non-cash P&L items (produits/charges non encaissés)
+  // The actual cash is already captured by assetSales/assetPurchases
+  const nonCashPnL = sumNonCashPnL(db)
+
   return (
     initialCash +
     revenue -
     expenses -
+    nonCashPnL -
     assetPurchases +
     assetSales +
     loanProceeds -

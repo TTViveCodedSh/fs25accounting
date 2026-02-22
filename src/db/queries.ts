@@ -438,6 +438,34 @@ export function returnLease(db: Database, id: number): void {
   exec(db, `UPDATE lease SET status = 'returned' WHERE id = ?`, [id])
 }
 
+/** Process one monthly payment for every active lease that still has payments remaining.
+ *  Call once per month-open, or N times for year-end catch-up. */
+export function processLeasePayments(db: Database, periodId: number, date: string, months: number = 1): void {
+  for (let m = 0; m < months; m++) {
+    // Re-fetch each iteration so remaining_balance reflects prior payments
+    const leases = getActiveLeases(db)
+    for (const lease of leases) {
+      if (lease.payments_made >= lease.duration_months) continue
+
+      const monthlyRate = lease.interest_rate / 100 / 12
+      const interest = Math.round(lease.remaining_balance * monthlyRate)
+      const capital = Math.round((lease.monthly_payment - interest) * 100) / 100
+
+      recordLeasePayment(db, lease.id, capital)
+
+      if (interest > 0) {
+        const catResult = queryOne<{ id: number }>(db, `SELECT id FROM category WHERE name = 'Lease Interest'`)
+        let catId = catResult?.id as number | undefined
+        if (!catId) {
+          const fallback = queryOne<{ id: number }>(db, `SELECT id FROM category WHERE name = 'Lease Payment'`)
+          catId = fallback?.id
+        }
+        createTransaction(db, periodId, date, `Lease interest: ${lease.name}`, interest, 'expense', catId ?? null, null)
+      }
+    }
+  }
+}
+
 // --- Loans ---
 
 export function getLoans(db: Database): Loan[] {
@@ -628,6 +656,18 @@ export function totalLeaseCapitalOutflow(db: Database): number {
   const row = queryOne<{ total: number }>(
     db,
     `SELECT COALESCE(SUM(total_value - remaining_balance), 0) as total FROM lease`,
+  )
+  return row?.total ?? 0
+}
+
+/** Net non-cash P&L: capital gains (revenue) minus capital losses (expense).
+ *  These are accounting entries only — the actual cash flows are in assetSales/assetPurchases. */
+export function sumNonCashPnL(db: Database): number {
+  const row = queryOne<{ total: number }>(
+    db,
+    `SELECT COALESCE(SUM(CASE WHEN t.type = 'revenue' THEN t.amount ELSE -t.amount END), 0) as total
+     FROM "transaction" t JOIN category c ON t.category_id = c.id
+     WHERE c.name IN ('Capital Gain', 'Capital Loss')`,
   )
   return row?.total ?? 0
 }
